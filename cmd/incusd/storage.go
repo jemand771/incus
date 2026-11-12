@@ -46,7 +46,9 @@ func readStoragePoolDriversCache() ([]api.ServerStorageDriverInfo, map[string]st
 	return supportedDrivers, usedDrivers
 }
 
-func storageStartup(s *state.State) error {
+func storageStartup(stateFunc func() *state.State) error {
+	s := stateFunc()
+
 	// Update the storage drivers supported and used cache in api_1.0.go.
 	storagePoolDriversCacheUpdate(s.ShutdownCtx, s)
 
@@ -73,7 +75,7 @@ func storageStartup(s *state.State) error {
 		initPools[poolName] = struct{}{}
 	}
 
-	initPool := func(poolName string) bool {
+	initPool := func(s *state.State, poolName string) bool {
 		logger.Debug("Initializing storage pool", logger.Ctx{"pool": poolName})
 
 		pool, err := storagePools.LoadByName(s, poolName)
@@ -111,7 +113,7 @@ func storageStartup(s *state.State) error {
 
 	// Try initializing storage pools in random order.
 	for poolName := range initPools {
-		if initPool(poolName) {
+		if initPool(s, poolName) {
 			// Storage pool initialized successfully so remove it from the list so its not retried.
 			delete(initPools, poolName)
 		}
@@ -131,10 +133,13 @@ func storageStartup(s *state.State) error {
 				case <-t.C:
 					t.Stop()
 
+					// Refresh the state as it may have changed since startup.
+					s := stateFunc()
+
 					// Try initializing remaining storage pools in random order.
 					var initializedPools []string
 					for poolName := range initPools {
-						if initPool(poolName) {
+						if initPool(s, poolName) {
 							// Storage pool initialized successfully or deleted so
 							// remove it from the list so its not retried.
 							delete(initPools, poolName)
